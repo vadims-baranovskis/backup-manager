@@ -75,6 +75,23 @@ def print_backup_summary(summary, backup_result, scan_errors):
             print(f"  ! {error}")
 
 
+def print_history(entries):
+    print("\n=== Backup History ===")
+
+    if not entries:
+        print("No history entries found.")
+        return
+
+    for entry in entries:
+        backup_path = entry["backup_path"] if entry["backup_path"] else "-"
+        file_hash = entry["file_hash"] if entry["file_hash"] else "-"
+
+        print(f"\n[{entry['created_at']}] {entry['action']}")
+        print(f"Source: {entry['source_path']}")
+        print(f"Backup: {backup_path}")
+        print(f"Hash:   {file_hash}")
+
+
 def handle_init():
     ensure_project_dirs()
     init_db()
@@ -111,11 +128,23 @@ def handle_backup(scan_path):
 
         summary = compare_states(previous_files, current_records)
 
+        action_map = {}
+        for path in summary.new_files:
+            action_map[path] = "created"
+        for path in summary.changed_files:
+            action_map[path] = "updated"
+
         records_to_backup = []
         for path in summary.new_files + summary.changed_files:
             records_to_backup.append(current_map[path])
 
-        backup_result = create_backups(records_to_backup, scan_time)
+        backup_result = create_backups(
+            records=records_to_backup,
+            action_map=action_map,
+            scan_time=scan_time,
+            repository=repository
+        )
+
         successful_backup_paths = set(backup_result.successful_paths)
 
         for path in summary.unchanged_files:
@@ -126,9 +155,30 @@ def handle_backup(scan_path):
                 repository.upsert_file(current_map[path], scan_time)
 
         repository.mark_files_deleted(summary.deleted_files, scan_time)
+
+        for path in summary.deleted_files:
+            repository.add_history_entry(
+                source_path=path,
+                backup_path="",
+                file_hash=previous_files[path]["file_hash"],
+                action="deleted",
+                created_at=scan_time
+            )
+
         repository.commit()
 
     print_backup_summary(summary, backup_result, scan_errors)
+
+
+def handle_history(limit, path_query):
+    ensure_project_dirs()
+    init_db()
+
+    with get_connection() as connection:
+        repository = FileRepository(connection)
+        entries = repository.get_history(limit=limit, path_query=path_query)
+
+    print_history(entries)
 
 
 def run_cli():
@@ -153,6 +203,19 @@ def run_cli():
         help="Path to the folder to back up"
     )
 
+    history_parser = subparsers.add_parser("history", help="Show backup history")
+    history_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum number of history entries to show"
+    )
+    history_parser.add_argument(
+        "--path",
+        required=False,
+        help="Optional part of the source path to filter history"
+    )
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -161,5 +224,7 @@ def run_cli():
         handle_scan(args.path)
     elif args.command == "backup":
         handle_backup(args.path)
+    elif args.command == "history":
+        handle_history(args.limit, args.path)
     else:
         parser.print_help()

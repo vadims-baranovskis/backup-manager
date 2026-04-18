@@ -63,5 +63,45 @@ class FileRepository:
             WHERE path = ?
         """, [(deleted_time, deleted_time, path) for path in deleted_paths])
 
+    def add_history_entry(self, source_path, backup_path, file_hash, action, created_at):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            INSERT INTO backup_history (
+                source_path,
+                backup_path,
+                file_hash,
+                action,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            source_path,
+            backup_path,
+            file_hash,
+            action,
+            created_at
+        ))
+
+    def get_history(self, limit=20, path_query=None):
+        cursor = self.connection.cursor()
+
+        if path_query:
+            cursor.execute("""
+                SELECT source_path, backup_path, file_hash, action, created_at
+                FROM backup_history
+                WHERE source_path LIKE ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (f"%{path_query}%", limit))
+        else:
+            cursor.execute("""
+                SELECT source_path, backup_path, file_hash, action, created_at
+                FROM backup_history
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (limit,))
+
+        return cursor.fetchall()
+
     def commit(self):
         self.connection.commit()
