@@ -1,0 +1,2 @@
+# No external dependencies yet.
+# The application currently uses only the Python standard library.
