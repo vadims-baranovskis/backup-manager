@@ -1,10 +1,14 @@
 import argparse
 from datetime import datetime
+from pathlib import Path
 
 from app.db.connection import get_connection
 from app.db.schema import init_db
-from app.repositories.file_repository import FileRepository
+from app.models.file_record import FileRecord
+from app.repositories.file_repository import FileRepository, normalize_path_for_compare
 from app.services.backup_service import create_backups
+from app.services.hasher import calculate_file_hash
+from app.services.restore_service import restore_from_history_entry
 from app.services.scanner import scan_directory
 from app.services.tracker import compare_states
 from app.settings import ensure_project_dirs
@@ -90,6 +94,51 @@ def print_history(entries):
         print(f"Source: {entry['source_path']}")
         print(f"Backup: {backup_path}")
         print(f"Hash:   {file_hash}")
+
+
+def print_restore_result(result):
+    print("\n=== Restore Result ===")
+    print(f"Success: {'yes' if result.success else 'no'}")
+    print(f"Message: {result.message}")
+    print(f"Source:  {result.source_path}")
+    print(f"Backup:  {result.backup_path}")
+    print(f"Target:  {result.restored_to}")
+
+
+def sync_restored_file_if_needed(result):
+    if not result.success:
+        return
+
+    if normalize_path_for_compare(result.source_path) != normalize_path_for_compare(result.restored_to):
+        return
+
+    restored_path = Path(result.restored_to)
+
+    if not restored_path.exists() or not restored_path.is_file():
+        return
+
+    stat = restored_path.stat()
+    restored_record = FileRecord(
+        path=str(restored_path.resolve()),
+        name=restored_path.name,
+        size=stat.st_size,
+        modified_at=datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+        file_hash=calculate_file_hash(restored_path)
+    )
+
+    event_time = datetime.now().isoformat(timespec="seconds")
+
+    with get_connection() as connection:
+        repository = FileRepository(connection)
+        repository.upsert_file(restored_record, event_time)
+        repository.add_history_entry(
+            source_path=restored_record.path,
+            backup_path=result.backup_path,
+            file_hash=restored_record.file_hash,
+            action="restored",
+            created_at=event_time
+        )
+        repository.commit()
 
 
 def handle_init():
@@ -181,6 +230,33 @@ def handle_history(limit, path_query):
     print_history(entries)
 
 
+def handle_restore(source_path, output_path, overwrite):
+    ensure_project_dirs()
+    init_db()
+
+    with get_connection() as connection:
+        repository = FileRepository(connection)
+        entry = repository.get_latest_restorable_entry(source_path)
+
+    if not entry:
+        print("\n=== Restore Result ===")
+        print("Success: no")
+        print("Message: No restorable backup entry was found for the specified source path.")
+        print(f"Source:  {source_path}")
+        print("Backup:  -")
+        print(f"Target:  {output_path if output_path else source_path}")
+        return
+
+    result = restore_from_history_entry(
+        history_entry=entry,
+        output_path=output_path,
+        overwrite=overwrite
+    )
+
+    sync_restored_file_if_needed(result)
+    print_restore_result(result)
+
+
 def run_cli():
     parser = argparse.ArgumentParser(
         description="Backup and File Indexing Manager"
@@ -216,6 +292,23 @@ def run_cli():
         help="Optional part of the source path to filter history"
     )
 
+    restore_parser = subparsers.add_parser("restore", help="Restore the latest saved version of a file")
+    restore_parser.add_argument(
+        "--source-path",
+        required=True,
+        help="Exact original source path of the file"
+    )
+    restore_parser.add_argument(
+        "--output-path",
+        required=False,
+        help="Optional target file path or existing folder"
+    )
+    restore_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite the target file if it already exists"
+    )
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -226,5 +319,7 @@ def run_cli():
         handle_backup(args.path)
     elif args.command == "history":
         handle_history(args.limit, args.path)
+    elif args.command == "restore":
+        handle_restore(args.source_path, args.output_path, args.overwrite)
     else:
         parser.print_help()

@@ -1,3 +1,10 @@
+from pathlib import Path
+
+
+def normalize_path_for_compare(path):
+    return str(Path(path).expanduser()).strip().replace("/", "\\").casefold()
+
+
 class FileRepository:
     def __init__(self, connection):
         self.connection = connection
@@ -102,6 +109,27 @@ class FileRepository:
             """, (limit,))
 
         return cursor.fetchall()
+
+    def get_latest_restorable_entry(self, source_path):
+        target_path = normalize_path_for_compare(source_path)
+
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            SELECT source_path, backup_path, file_hash, action, created_at
+            FROM backup_history
+            WHERE backup_path IS NOT NULL
+              AND backup_path != ''
+            ORDER BY created_at DESC
+        """)
+
+        rows = cursor.fetchall()
+
+        for row in rows:
+            stored_path = normalize_path_for_compare(row["source_path"])
+            if stored_path == target_path:
+                return row
+
+        return None
 
     def commit(self):
         self.connection.commit()
