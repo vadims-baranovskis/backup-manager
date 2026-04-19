@@ -144,7 +144,7 @@ def sync_restored_file_if_needed(result):
 def handle_init():
     ensure_project_dirs()
     init_db()
-    print("Project folders and database have been initialized.")
+    print("Project folders, database, and config file have been initialized.")
 
 
 def handle_scan(scan_path):

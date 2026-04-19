@@ -1,0 +1,23 @@
+{
+    "scan": {
+        "excluded_directories": [
+            "packages",
+            "bin",
+            "obj",
+            ".git",
+            "node_modules",
+            "__pycache__",
+            ".venv",
+            ".pytest_cache"
+        ],
+        "excluded_extensions": [
+            ".tmp",
+            ".log",
+            ".cache"
+        ],
+        "excluded_file_names": [
+            "Thumbs.db",
+            ".DS_Store"
+        ]
+    }
+}
