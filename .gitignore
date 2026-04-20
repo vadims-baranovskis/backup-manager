@@ -1,0 +1,23 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Pytest
+.pytest_cache/
+
+# VS Code
+.vscode/
+
+# Local runtime data
+data/backup_manager.db
+backups/
+
+# Temporary restore/testing folders
+restore_test/
+
+# OS files
+Thumbs.db
+.DS_Store
